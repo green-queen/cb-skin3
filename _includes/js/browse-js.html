@@ -56,49 +56,20 @@ function makeCard(obj) {
     const placeholder = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'%3E%3C/svg%3E";
     const itemHref = `{{ '/items/' | relative_url }}${ obj.parent ? obj.parent + ".html#" + obj.id : obj.id + ".html"}`;
     
-    let card = '<div class="item col-lg-4 col-md-6 mb-2"><div class="card">';
+    let card = '<div class="item col-lg-2 col-md-6 col-sm-12 mb-2"><div class="card">';
     
     // Image or icon
     if(obj.img) {
-        card += `<a href="${itemHref}"><img class="card-img-top lazyload" src="${placeholder}" data-src="${obj.img}" alt="${obj.alt || obj.title}"></a>`;
+        card += '<button class="btn" type="button" style="border:0px; padding:0px;" data-bs-toggle="offcanvas" data-bs-target="#offcanvasExample" aria-controls="offcanvasExample" ondblclick="window.location=\'' + itemHref + '\'; return false;" onclick="openOffcanvas(\'' + obj.id + '\')"> <img class="card-img-top lazyload" data-src="' + obj.img + '" alt="Image of ' + obj.title + '"></button>'
     }
-    
-    // Title
-    card += `<div class="card-body text-center"><h3 class="card-title h4"><a href="${itemHref}" class="text-dark">${obj.title}</a></h3>`;
     
     // Icon for items without images
     if(!obj.img) {
         const thumbIcon = getIcon(obj.display_template, obj.format, "thumb");
-        if(thumbIcon) card += `<p><a href="${itemHref}">${thumbIcon}</a></p>`;
+        if(thumbIcon) card += '<button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasExample" aria-controls="offcanvasExample" onclick="openOffcanvas(\'' + obj.id + '\')"><img class="card-img-top lazyload" data-src= "thumbIcon"></button>';
     }
-    
-    // Field data
-    card += '<p class="card-text">';
-    {% for f in fields %}{% unless f.hidden == 'true' %}
-    if(obj[{{ f.field | jsonify }}]){
-        {% if f.display_name %}card += '<strong>{{ f.display_name }}:</strong> ';{% endif %}
-        {% if f.btn == 'true' %}
-        const btns = obj[{{ f.field | jsonify }}].split(";");
-        btns.forEach(btn => {
-            if(btn.trim()) {
-                card += `<a class="btn btn-sm btn-secondary m-1 text-wrap" href="{{ page.url | relative_url }}#{{ f.field }}:${encodeURIComponent(btn.trim())}">${btn.trim()}</a>`;
-            }
-        });
-        {% else %}
-        card += obj[{{ f.field | jsonify }}];
-        {% endif %}
-        {% unless forloop.last %}card += '<br>';{% endunless %}
-    }
-    {% endunless %}{% endfor %}
-    card += '</p>';
-    
-    // Media type badge
-    if(obj.display_template) {
-        const mediaIcon = getIcon(obj.display_template, obj.format, "hidden");
-        card += `<p class="card-text"><small><a class="btn btn-sm btn-outline-secondary" href="{{ page.url | relative_url }}#display_template:${encodeURIComponent(obj.display_template)}">${obj.display_template.toUpperCase().replace("_"," ")} ${mediaIcon}</a></small></p>`;
-    }
-    
-    card += `<hr><a href="${itemHref}" class="btn btn-sm btn-light" title="link to ${obj.title}">View Full Record</a></div></div></div>`;
+
+    card += `</div></div></div>`;
     return card;
 }
 
@@ -1045,4 +1016,241 @@ function setupEventHandlers() {
     }
 }
 </script>
+
+<script>
+/* include full item dataset and display logic so offcanvas matches item page */
+{%- assign fields = site.data.config-metadata -%}
+{%- assign stubs = site.data.config-nav | map: 'stub' | join: ';' -%}
+{%- assign cb_items = site.data[site.metadata] | where_exp: 'item','item.objectid' -%}
+var cb_items = [ 
+    {%- for item in cb_items -%}
+    { 
+        "objectid": {{ item.objectid | jsonify }}, 
+        {% if item.parentid %}"parentid": {{ item.parentid | jsonify }}, {% endif %}
+        {% if item.title %}"title": {{ item.title | jsonify }}, {% endif %}
+        {% for f in fields %}{% if item[f.field] %}{{ f.field | jsonify }}: {{ item[f.field] | jsonify }}, {% endif %}{% endfor %}
+        {% if item.youtubeid %}"youtubeid": {{ item.youtubeid | jsonify }}, {% endif %}
+        {% if item.vimeoid %}"vimeoid": {{ item.vimeoid | jsonify }}, {% endif %}
+        {% if item.format %}"format": {{ item.format | jsonify }}, {% endif %}
+        {% if item.image_thumb %}"image_thumb": {{ item.image_thumb | relative_url | jsonify }}, {% endif %}
+        {% if item.image_small %}"image_small": {{ item.image_small | relative_url | jsonify }}, {% endif %}
+        {% if item.image_med %}"image_med": {{ item.image_med | relative_url | jsonify }}, {% endif %}
+        {% if item.image_lg %}"image_lg": {{ item.image_lg | relative_url | jsonify }}, {% endif %}
+        "filename": {% if item.filename %}{{ item.filename | jsonify }}{% else %}""{% endif %} 
+    }{% unless forloop.last %}, {% endunless %}
+    {% endfor %}
+];
+
+/* helper to find file link (same as item page) */
+function findFileLink(item) {
+    var fileLink = item.filename && item.filename.includes('/') ? item.filename : "{{ '/objects/' | relative_url }}" + item.filename;
+    return fileLink;
+}
+
+/* openOffcanvas: find record and render into offcanvas using adapted display logic */
+function openOffcanvas(objectid) {
+    console.log('Opening offcanvas for objectid:', objectid);
+    var record_index = cb_items.findIndex(item => item.objectid == objectid);
+    if (record_index === -1) {
+        console.error('Could not find item with objectid:', objectid);
+        return;
+    }
+    var record = cb_items[record_index];
+    console.log('Found record:', record);
+    var child_records = cb_items.filter(item => item.parentid == objectid);
+    if (child_records.length > 0) {
+        console.log('Found child records:', child_records);
+    }
+
+    // reuse core parts of the item display logic (generate metadata, add buttons, addItem)
+    function addItem(item, mainRecord) {
+        var itemDisplay, itemDownload;
+        var objectBase = "{{ '/objects/' | relative_url }}";
+        console.log("Processing item:", item); // Debug line
+        
+        // Helper function to get the correct file path
+        function getFilePath(filename) {
+            if (!filename) return '';
+            return filename.includes('/') ? filename : objectBase + filename;
+        }
+        
+        if (item.format && item.format.includes('image')) {
+            // Use the largest available image size for display
+            var displaySrc = '';
+            if (item.image_lg) displaySrc = item.image_lg;
+            else if (item.image_med) displaySrc = item.image_med;
+            else if (item.image_small) displaySrc = item.image_small;
+            else displaySrc = getFilePath(item.filename);
+            
+            // Use original file for download
+            var downloadSrc = getFilePath(item.filename);
+            
+            itemDisplay = '<a class="spotlight gallery-img" data-download="true" href="' + downloadSrc + '"><img class="img-fluid" src="' + displaySrc + '" alt="' + (item.title || '') + '">';
+            itemDisplay += '<div><small class="text-dark">Click to view full screen</small></div></a>';
+            itemDownload = '<a href="' + downloadSrc + '" target="_blank" rel="noopener" class="btn btn-outline-danger" title="Object download">Download ' + (item.format ? item.format.split("/").pop().toUpperCase() : '') + '</a>';
+        } else if (item.format && item.format.includes('pdf')) {
+            var pdfSrc = getFilePath(item.filename);
+            itemDisplay = '<div class="ratio ratio-4x3"><object title="PDF file of ' + (item.title || '') + '" data="' + pdfSrc + '" type="application/pdf" width="100%"><p>The PDF is not rendering in your browser. Please use the button below to download the PDF.</p></object></div>';
+            itemDownload = '<a href="' + pdfSrc + '" target="_blank" rel="noopener" class="btn btn-outline-danger" title="Object download">Download PDF</a>';
+        } else if (item.format && item.format.includes('audio')) {
+            var audioSrc = getFilePath(item.filename);
+            itemDisplay = '<audio controls class="w-100"><source src="' + audioSrc + '" type="' + item.format + '">Your browser does not support the audio element. Please <a href="' + audioSrc + '">download the audio file</a>.</audio>';
+            itemDownload = '<a href="' + audioSrc + '" target="_blank" rel="noopener" class="btn btn-outline-danger" title="Object download">Download ' + (item.format ? item.format.split("/").pop().toUpperCase() : 'Audio') + '</a>';
+        } else if (item.youtubeid) {
+            itemDisplay = '<div class="ratio ratio-16x9"><iframe title="video embed ' + (item.title || '') + '" src="https://www.youtube-nocookie.com/embed/' + item.youtubeid + '?enablejsapi=1&rel=0&modestbranding=1" allowfullscreen></iframe></div>';
+            itemDownload = '<a href="https://youtu.be/' + item.youtubeid + '" target="_blank" rel="noopener" class="btn btn-outline-danger" title="Object download">View on YouTube</a>';
+        } else if (item.vimeoid) {
+            itemDisplay = '<div class="ratio ratio-16x9"><iframe title="video embed ' + (item.title || '') + '" src="https://player.vimeo.com/video/' + item.vimeoid + '" allowfullscreen></iframe></div>';
+            itemDownload = '<a href="https://vimeo.com/' + item.vimeoid + '" target="_blank" rel="noopener" class="btn btn-outline-danger" title="Object download">View on Vimeo</a>';
+        } else if (item.format && item.format.includes('video')) {
+            var videoSrc = getFilePath(item.filename);
+            itemDisplay = '<video controls class="w-100"><source src="' + videoSrc + '" type="' + item.format + '">Your browser does not support the video tag. Please <a href="' + videoSrc + '">download the video file</a>.</video>';
+            itemDownload = '<a href="' + videoSrc + '" target="_blank" rel="noopener" class="btn btn-outline-danger" title="Object download">Download ' + (item.format ? item.format.split("/").pop().toUpperCase() : 'Video') + '</a>';
+        } else if (item.format && item.format.includes('record')) {
+            itemDisplay = item === mainRecord ? '' : '<img class="w-25" src="{{ "/assets/lib/icons/" | relative_url }}icon-record.svg" alt="No preview found">';
+            var fileSrc = getFilePath(item.filename);
+            itemDownload = fileSrc ? '<a href="' + fileSrc + '" target="_blank" rel="noopener" class="btn btn-outline-danger" title="Object download">Link to Object</a>' : '';
+        } else if (item.filename) {
+            // Handle other file types with a download link
+            var fileSrc = getFilePath(item.filename);
+            itemDisplay = '<div class="text-center"><img class="w-50" src="{{ "/assets/lib/icons/" | relative_url }}icon-default.svg" alt="No preview found"><div class="mt-2">' + item.filename + '</div></div>';
+            itemDownload = '<a href="' + fileSrc + '" target="_blank" rel="noopener" class="btn btn-outline-danger" title="Object download">Download ' + (item.format ? item.format.toUpperCase() : 'File') + '</a>';
+        } else {
+            // Fallback for items without files
+            itemDisplay = '<div class="text-center"><img class="w-50" src="{{ "/assets/lib/icons/" | relative_url }}icon-default.svg" alt="No preview found"><div class="mt-2">No file available</div></div>';
+            itemDownload = '';
+        }
+        return { itemDisplay: itemDisplay, itemDownload: itemDownload };
+    }
+
+    function generateMetadata(item) {
+        var fields_html = '<dl>';
+        {% for f in fields %}{% if f.browse_link == "true" %}
+        if (item[{{ f.field | jsonify }}]) {
+            var topics = item[{{ f.field | jsonify }}].split(';');
+            var browseLinks = "";
+            for (var i = 0, len = topics.length; i < len; i++) {
+                if (topics[i] != "") {
+                    browseLinks += '<a class="btn btn-link" href="{{ '/browse.html' | relative_url }}#' + encodeURIComponent(topics[i].trim()) + '">' + topics[i].trim() + '</a> ';
+                }
+            }
+            fields_html += '<dt class="field">{{ f.display_name }}:</dt> <dd class="field-value">' + browseLinks + '</dd>';
+        }
+        {%- else -%}
+        if (item[{{ f.field | jsonify }}]) { fields_html += '<dt class="field">{{ f.display_name }}:</dt> <dd class="field-value">{% if f.external_link == "true" %}<a href="' + item[{{ f.field | jsonify }}] + '" target="_blank" rel="noopener">' + item[{{ f.field | jsonify }}] + '</a>{% else %}' + item[{{ f.field | jsonify }}] + '{% endif %}</dd>'; }
+        {% endif %}{% endfor %}
+        fields_html += '</dl>';
+        return fields_html;
+    }
+
+    // build content
+    var itemImageHTML = '';
+    var itemLinkHTML = '';
+    var compoundDownload = '';
+
+    if (child_records.length > 0) {
+        // compound/multiple handling: reuse simplified compound rendering for offcanvas
+        var compound_html = '';
+        compoundDownload = '<div class="btn-group" role="group">';
+        // First add the parent record if it has content
+        if (record.filename || record.youtubeid || record.vimeoid) {
+            var resParent = addItem(record, record);
+            compound_html += '<div class="mb-4">' + resParent.itemDisplay + '</div>';
+            compoundDownload += resParent.itemDownload ? resParent.itemDownload : '';
+        }
+        // Then add all child records
+        for (var i = 0; i < child_records.length; i++) {
+            var res = addItem(child_records[i], record);
+            compound_html += '<div class="mb-4">' + res.itemDisplay + '</div>';
+            compoundDownload += res.itemDownload ? res.itemDownload : '';
+        }
+        compoundDownload += '</div>';
+        itemImageHTML = compound_html;
+        itemLinkHTML = compoundDownload;
+    } else {
+        var resMain = addItem(record, record);
+        itemImageHTML = resMain.itemDisplay;
+        itemLinkHTML = resMain.itemDownload;
+    }
+
+    // format text
+    var itemFormat = '';
+    if (child_records.length > 0) {
+        itemFormat = record.format.replace("_", " ").toUpperCase() + ' (' + child_records.length + ' Items)';
+    } else if (record.format && record.format.includes('pdf')) {
+        itemFormat = 'PDF';
+    } else if (record.format && record.format.includes('/')) {
+        itemFormat = record.format.split('/')[0].toUpperCase();
+    } else {
+        itemFormat = record.format ? record.format.replace("_", " ").toUpperCase() : '';
+    }
+
+    document.getElementById("bc-title").innerHTML = record.title ? record.title : '';
+    document.getElementById("item-format").innerHTML = itemFormat;
+    document.getElementById("item-title").innerHTML = (record.format && record.format.includes('record')) ? (record.title ? record.title : '') : (record.title ? record.title + '<a href="#item-metadata" class="ms-5 btn btn-sm btn-outline-dark small">Item Info <svg class="bi icon-sprite" role="img" aria-label="Jump to Item Info"><use xlink:href="{{ "/assets/lib/cb-icons.svg" | relative_url }}#arrow-down"/></svg></a>' : '');
+
+    // assemble content block
+    var itemContent = '<div class="card mb-4 text-center">' + itemImageHTML + '<div class="card-body">' + itemLinkHTML + '</div></div>';
+    document.getElementById("item-content").innerHTML = itemContent;
+    document.getElementById("item-metadata").innerHTML = generateMetadata(record);
+
+    // Add item navigation - handle compound objects differently
+    var filtered_items = cb_items.filter(item => !item.parentid); // Only navigate through parent items
+    var current_index = filtered_items.findIndex(item => item.objectid == (record.parentid || record.objectid));
+    var previous = current_index > 0 ? filtered_items[current_index - 1] : null;
+    var next = current_index < filtered_items.length - 1 ? filtered_items[current_index + 1] : null;
+
+    if (previous) {
+        document.getElementById("item-previous").innerHTML = '<a class="btn btn-outline-primary" href="#" onclick="openOffcanvas(\'' + previous.objectid + '\'); return false;" title="Previous item">&laquo; Previous</a>';
+    } else {
+        document.getElementById("item-previous").innerHTML = '';
+    }
+    if (next) {
+        document.getElementById("item-next").innerHTML = '<a class="btn btn-outline-primary" href="#" onclick="openOffcanvas(\'' + next.objectid + '\'); return false;" title="Next item">Next &raquo;</a>';
+    } else {
+        document.getElementById("item-next").innerHTML = '';
+    }
+
+    // back button in offcanvas
+    document.getElementById("browse-buttons").innerHTML = '<a class="btn btn-secondary" href="{{ '/browse.html' | relative_url }}">&laquo; Back to Collection Browse</a>';
+}
+</script>
+
+
+ <div class="offcanvas offcanvas-start" tabindex="-1" id="offcanvasExample" aria-labelledby="offcanvasExampleLabel">
+     <div class="offcanvas-body"> 
+        <div> 
+            <div class="container py-3">
+                <ul class="breadcrumb h6">bun
+                    <li class="breadcrumb-item"><a class="text-dark" href="{{ '/' | relative_url }}">{{ site.title }}</a></li>
+                    <li class="breadcrumb-item"><a class="text-dark" href="{{ '/browse.html' | relative_url }}">Browse</a></li>
+                    <li id="bc-title" class="breadcrumb-item active text-dark" aria-current="page"></li>
+                </ul>
+            <div class="my-0 h5 small" id="item-format"></div>
+            <h2 id="item-title" class="mb-3"></h2>
+
+        <div class="row justify-content-center">
+
+        <div class="col-12 col-md-10">
+            <div id="item-content"></div>
+        </div>
+        <div class="col-12 col-md-10">
+            <div id="item-metadata">
+            </div>
+        </div> 
+    </div>
+
+                <div id="browse-buttons" class="text-center">
+                    <a class="btn btn-secondary" href="{{ '/browse.html' | relative_url }}">&laquo; Back to Collection Browse</a>
+                </div>
+                <div id="item-nav">
+                    <nav aria-label="collection item navigation">
+                    </nav>
+                </div>
+            
+            </div>
+        </div> 
+    </div> 
+</div>
+
 {% endunless %}
